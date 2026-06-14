@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>博客系统</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+</head>
+<body>
+<div id="app">
+    <!-- 消息提示 -->
+    <div v-if="toast.show" :class="['toast', toast.type]">
+        {{ toast.message }}
+    </div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="#" class="navbar-brand" @click.prevent="navigate('home')">博客系统</a>
+            <ul class="navbar-nav">
+                <li><a href="#" :class="{active: currentPage === 'home'}" @click.prevent="navigate('home')">首页</a></li>
+                <li v-if="isLoggedIn"><a href="#" :class="{active: currentPage === 'admin'}" @click.prevent="navigate('admin')">后台管理</a></li>
+            </ul>
+            <div class="navbar-user">
+                <template v-if="isLoggedIn">
+                    <span>{{ user.nickname || user.username }}</span>
+                    <button class="btn btn-outline btn-small" @click="logout">退出</button>
+                </template>
+                <template v-else>
+                    <button class="btn btn-outline btn-small" @click="showLoginModal = true">登录</button>
+                    <button class="btn btn-primary btn-small" @click="showRegisterModal = true">注册</button>
+                </template>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 首页 -->
+    <div v-if="currentPage === 'home'" class="container">
+        <div class="page-layout">
+            <main>
+                <!-- 分类筛选 -->
+                <div class="card">
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <span :class="['category-tag', {active: !currentCategory}]" @click="filterByCategory(null)">全部</span>
+                        <span v-for="cat in categories" :key="cat.id"
+                              :class="['category-tag', {active: currentCategory === cat.id}]"
+                              @click="filterByCategory(cat.id)">
+                            {{ cat.name }}
+                        </span>
+                    </div>
+                </div>
+
+                                <!-- 搜索 -->
+                <div class="search-bar" style="margin-bottom: 15px; display: flex; gap: 10px;">
+                    <input v-model="searchKeyword" @keyup.enter="doSearch" placeholder="搜索文章标题或内容..." 
+                           style="flex: 1; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 20px;">
+                    <button @click="doSearch" class="btn btn-primary btn-small" style="border-radius: 20px;">搜索</button>
+                    <button v-if="isSearching" @click="clearSearch" class="btn btn-outline btn-small" style="border-radius: 20px;">清除</button>
+                </div>
+<!-- 文章列表 -->
+                <div class="article-list">
+                    <div v-if="loading" class="loading"></div>
+                    <template v-else-if="articles.length > 0">
+                        <div v-for="article in articles" :key="article.id"
+                             class="article-item" @click="viewArticle(article.id)">
+                            <h3 class="article-title">{{ article.title }}</h3>
+                            <p class="article-summary">{{ article.summary }}</p>
+                            <div class="article-meta">
+                                <span>分类: {{ getCategoryName(article.category_id) }}</span>
+                                <span>浏览: {{ article.view_count || 0 }}</span>
+                                <span>点赞: {{ article.like_count || 0 }}</span>
+                                <span>{{ formatDate(article.create_time) }}</span>
+                            </div>
+                        </div>
+                    </template>
+                    <div v-else class="empty-state">
+                        <div class="empty-state-icon">📝</div>
+                        <p>暂无文章</p>
+                    </div>
+                </div>
+
+                <!-- 分页 -->
+                <div class="pagination" v-if="totalPages > 1">
+                    <button :disabled="currentPageNum === 1" @click="changePage(currentPageNum - 1)">上一页</button>
+                    <button v-for="page in pageNumbers" :key="page"
+                            :class="{active: page === currentPageNum}"
+                            @click="changePage(page)">
+                        {{ page }}
+                    </button>
+                    <button :disabled="currentPageNum === totalPages" @click="changePage(currentPageNum + 1)">下一页</button>
+                </div>
+            </main>
+
+            <!-- 侧边栏 -->
+            <aside class="sidebar">
+                <!-- 用户信息卡片 -->
+                <div class="card" v-if="isLoggedIn">
+                    <div style="text-align: center;">
+                        <div style="width: 80px; height: 80px; border-radius: 50%; background: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 15px;">
+                            {{ (user.nickname || user.username || '').charAt(0).toUpperCase() }}
+                        </div>
+                        <h4>{{ user.nickname || user.username }}</h4>
+                        <p style="color: var(--text-secondary); margin-top: 5px;">{{ user.email || '暂无邮箱' }}</p>
+                    </div>
+                </div>
+
+                <!-- 热门文章 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">热门文章</span>
+                    </div>
+                    <div v-for="article in hotArticles" :key="article.id"
+                         style="padding: 10px 0; border-bottom: 1px solid var(--border-color); cursor: pointer;"
+                         @click="viewArticle(article.id)">
+                        <div style="font-weight: 500; margin-bottom: 5px;">{{ article.title }}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">
+                            浏览 {{ article.view_count || 0 }} · 点赞 {{ article.like_count || 0 }}
+                        </div>
+                    </div>
+                    <div v-if="hotArticles.length === 0" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                        暂无数据
+                    </div>
+                </div>
+
+                <!-- 站点统计 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">站点统计</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: center;">
+                        <div>
+                            <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);">{{ stats.articles }}</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">文章</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 24px; font-weight: bold; color: var(--success-color);">{{ stats.categories }}</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">分类</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- 文章详情页 -->
+    <div v-if="currentPage === 'article'" class="container" style="padding: 30px 20px;">
+        <div style="margin-bottom: 20px;">
+            <button class="btn btn-outline btn-small" @click="navigate('home')">← 返回列表</button>
+        </div>
+        <div class="article-detail" v-if="currentArticle">
+            <h1 class="article-detail-title">{{ currentArticle.title }}</h1>
+            <div class="article-meta" style="margin-bottom: 30px;">
+                <span>分类: {{ getCategoryName(currentArticle.category_id) }}</span>
+                <span>浏览: {{ currentArticle.view_count || 0 }}</span>
+                <span>{{ formatDate(currentArticle.create_time) }}</span>
+            </div>
+            <div class="article-detail-content" v-html="currentArticle.content"></div>
+
+            <!-- 点赞按钮 -->
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                <button :class="['like-btn', {liked: isLiked}]" @click="toggleLike" :disabled="!isLoggedIn">
+                    <span>{{ isLiked ? '❤️' : '🤍' }}</span>
+                    <span>{{ likeCount }} 点赞</span>
+                </button>
+                <span v-if="!isLoggedIn" style="margin-left: 10px; color: var(--text-secondary); font-size: 13px;">登录后可点赞</span>
+            </div>
+        </div>
+
+        <!-- 评论区 -->
+        <div class="card comment-section">
+            <div class="card-header">
+                <span class="card-title">评论 ({{ comments.length }})</span>
+            </div>
+
+            <!-- 发表评论 -->
+            <div v-if="isLoggedIn" style="margin-bottom: 30px;">
+                <textarea class="form-control" v-model="commentContent" placeholder="写下你的评论..." rows="3"></textarea>
+                <button class="btn btn-primary" style="margin-top: 10px;" @click="submitComment" :disabled="!commentContent.trim()">
+                    发表评论
+                </button>
+            </div>
+            <div v-else style="text-align: center; padding: 20px; background: var(--background-color); border-radius: 8px; margin-bottom: 20px;">
+                <a href="#" @click.prevent="showLoginModal = true">登录</a> 后发表评论
+            </div>
+
+            <!-- 评论列表 -->
+            <div v-if="comments.length > 0">
+                <div v-for="comment in comments" :key="comment.id" class="comment-item">
+                    <div class="comment-header">
+                        <span class="comment-author">{{ userMap[comment.user_id]?.nickname || userMap[comment.user_id]?.username || '用户 #' + comment.user_id }}</span>
+                        <div>
+                            <span class="comment-time">{{ formatDate(comment.create_time) }}</span>
+                            <button v-if="isLoggedIn && user.id === comment.user_id"
+                                    class="btn btn-danger btn-small" style="margin-left: 10px; padding: 4px 8px;"
+                                    @click="deleteComment(comment.id)">
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                    <div class="comment-content">{{ comment.content }}</div>
+                </div>
+            </div>
+            <div v-else class="empty-state" style="padding: 30px;">
+                <p>暂无评论，快来抢沙发吧！</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 后台管理页 -->
+    <div v-if="currentPage === 'admin'" class="container" style="padding: 30px 20px;">
+        <h2 style="margin-bottom: 30px;">后台管理</h2>
+
+        <!-- 统计卡片 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.articles }}</div>
+                <div class="stat-label">文章总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.categories }}</div>
+                <div class="stat-label">分类总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.totalViews }}</div>
+                <div class="stat-label">总浏览量</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.totalLikes }}</div>
+                <div class="stat-label">总点赞数</div>
+            </div>
+        </div>
+
+        <!-- 管理选项卡 -->
+        <div class="card">
+            <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                <button :class="['btn', adminTab === 'articles' ? 'btn-primary' : 'btn-outline']" @click="adminTab = 'articles'">文章管理</button>
+                <button :class="['btn', adminTab === 'categories' ? 'btn-primary' : 'btn-outline']" @click="adminTab = 'categories'">分类管理</button>
+            </div>
+
+            <!-- 文章管理 -->
+            <div v-if="adminTab === 'articles'">
+                <div style="margin-bottom: 20px;">
+                    <button class="btn btn-primary" @click="openArticleModal()">发布文章</button>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>标题</th>
+                            <th>分类</th>
+                            <th>浏览</th>
+                            <th>点赞</th>
+                            <th>发布时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="article in adminArticles" :key="article.id">
+                            <td>{{ article.id }}</td>
+                            <td>{{ article.title }}</td>
+                            <td>{{ getCategoryName(article.category_id) }}</td>
+                            <td>{{ article.view_count || 0 }}</td>
+                            <td>{{ article.like_count || 0 }}</td>
+                            <td>{{ formatDate(article.create_time) }}</td>
+                            <td>
+                                <button class="btn btn-warning btn-small" @click="openArticleModal(article)">编辑</button>
+                                <button class="btn btn-danger btn-small" @click="confirmDeleteArticle(article.id)">删除</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div v-if="adminArticles.length === 0" class="empty-state">
+                    <p>暂无文章</p>
+                </div>
+            </div>
+
+            <!-- 分类管理 -->
+            <div v-if="adminTab === 'categories'">
+                <div style="margin-bottom: 20px;">
+                    <button class="btn btn-primary" @click="openCategoryModal()">新增分类</button>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>名称</th>
+                            <th>描述</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="category in categories" :key="category.id">
+                            <td>{{ category.id }}</td>
+                            <td>{{ category.name }}</td>
+                            <td>{{ category.description || '-' }}</td>
+                            <td>
+                                <button class="btn btn-warning btn-small" @click="openCategoryModal(category)">编辑</button>
+                                <button class="btn btn-danger btn-small" @click="confirmDeleteCategory(category.id)">删除</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div v-if="categories.length === 0" class="empty-state">
+                    <p>暂无分类</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录模态框 -->
+    <div v-if="showLoginModal" class="modal-overlay" @click.self="showLoginModal = false">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">用户登录</span>
+                <button class="modal-close" @click="showLoginModal = false">&times;</button>
+            </div>
+            <form @submit.prevent="handleLogin">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" class="form-control" v-model="loginForm.username" required>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" class="form-control" v-model="loginForm.password" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;" :disabled="loginLoading">
+                    {{ loginLoading ? '登录中...' : '登录' }}
+                </button>
+                <p style="text-align: center; margin-top: 15px;">
+                    还没有账号？ <a href="#" @click.prevent="showLoginModal = false; showRegisterModal = true">立即注册</a>
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <!-- 注册模态框 -->
+    <div v-if="showRegisterModal" class="modal-overlay" @click.self="showRegisterModal = false">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">用户注册</span>
+                <button class="modal-close" @click="showRegisterModal = false">&times;</button>
+            </div>
+            <form @submit.prevent="handleRegister">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" class="form-control" v-model="registerForm.username" required>
+                </div>
+                <div class="form-group">
+                    <label>昵称</label>
+                    <input type="text" class="form-control" v-model="registerForm.nickname" required>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" class="form-control" v-model="registerForm.password" required>
+                </div>
+                <div class="form-group">
+                    <label>确认密码</label>
+                    <input type="password" class="form-control" v-model="registerForm.confirmPassword" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;" :disabled="registerLoading">
+                    {{ registerLoading ? '注册中...' : '注册' }}
+                </button>
+                <p style="text-align: center; margin-top: 15px;">
+                    已有账号？ <a href="#" @click.prevent="showRegisterModal = false; showLoginModal = true">立即登录</a>
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <!-- 文章编辑模态框 -->
+    <div v-if="showArticleModal" class="modal-overlay" @click.self="showArticleModal = false">
+        <div class="modal" style="max-width: 700px;">
+            <div class="modal-header">
+                <span class="modal-title">{{ editingArticle.id ? '编辑文章' : '发布文章' }}</span>
+                <button class="modal-close" @click="showArticleModal = false">&times;</button>
+            </div>
+            <form @submit.prevent="saveArticle">
+                <div class="form-group">
+                    <label>标题</label>
+                    <input type="text" class="form-control" v-model="editingArticle.title" required>
+                </div>
+                <div class="form-group">
+                    <label>分类</label>
+                    <select class="form-control" v-model="editingArticle.category_id" required>
+                        <option value="">请选择分类</option>
+                        <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>摘要</label>
+                    <input type="text" class="form-control" v-model="editingArticle.summary">
+                </div>
+                <div class="form-group">
+                    <label>内容</label>
+                    <textarea class="form-control" v-model="editingArticle.content" rows="10" required></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">保存</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 分类编辑模态框 -->
+    <div v-if="showCategoryModal" class="modal-overlay" @click.self="showCategoryModal = false">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">{{ editingCategory.id ? '编辑分类' : '新增分类' }}</span>
+                <button class="modal-close" @click="showCategoryModal = false">&times;</button>
+            </div>
+            <form @submit.prevent="saveCategory">
+                <div class="form-group">
+                    <label>分类名称</label>
+                    <input type="text" class="form-control" v-model="editingCategory.name" required>
+                </div>
+                <div class="form-group">
+                    <label>描述</label>
+                    <input type="text" class="form-control" v-model="editingCategory.description">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">保存</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+target/
+*.class
+*.jar
+*.war
+.idea/
+*.iml
+.DS_Store
+*.log
+.settings/
+.classpath
+.project
+.factorypath
+bin/
+node_modules/
+.env
